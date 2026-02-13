@@ -132,9 +132,9 @@ class StorageService {
   }
 
   /**
-   * Obtém stream de leitura do arquivo
+   * Obtém stream de leitura do arquivo (async para S3)
    */
-  getFileStream(key: string): NodeJS.ReadableStream {
+  async getFileStream(key: string): Promise<NodeJS.ReadableStream> {
     if (this.config.type === 's3' || this.config.type === 'minio') {
       if (!this.s3Client) {
         throw new Error('S3 client not initialized');
@@ -145,13 +145,21 @@ class StorageService {
         Key: key,
       });
 
-      // Retornar stream do S3
-      return this.s3Client.send(command).then((response) => {
-        if (response.Body && 'transformToWebStream' in response.Body) {
-          return response.Body as any;
+      // Obter resposta do S3
+      const response = await this.s3Client.send(command);
+      
+      if (response.Body) {
+        // Converter Body para stream Node.js
+        if ('transformToByteArray' in response.Body) {
+          const bytes = await (response.Body as any).transformToByteArray();
+          const { Readable } = require('stream');
+          return Readable.from(Buffer.from(bytes));
         }
-        throw new Error('Unable to get file stream from S3');
-      }) as any;
+        // Se já for um stream
+        return response.Body as any;
+      }
+      
+      throw new Error('Unable to get file stream from S3');
     } else {
       // Storage local
       const localPath = join(this.config.localPath || 'uploads', key);

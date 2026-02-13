@@ -385,11 +385,11 @@ export const applyRedaction = async (
     }
 
     // Download do storage para arquivo temporário
-    const fileStream = storageService.getFileStream(document.originalPath);
+    const fileStream = await storageService.getFileStream(document.originalPath);
     const writeStream = require('fs').createWriteStream(tempOriginalPath);
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       fileStream.pipe(writeStream);
-      writeStream.on('finish', resolve);
+      writeStream.on('finish', () => resolve());
       writeStream.on('error', reject);
     });
 
@@ -500,9 +500,9 @@ export const downloadDocument = async (
       throw new CustomError('Insufficient permissions to download original', 403);
     }
 
-    const filePath = type === 'original' ? document.originalPath : document.redactedPath;
+    const storageKey = type === 'original' ? document.originalPath : document.redactedPath;
 
-    if (!filePath || !require('fs').existsSync(filePath)) {
+    if (!storageKey) {
       throw new CustomError('File not found', 404);
     }
 
@@ -519,7 +519,15 @@ export const downloadDocument = async (
       userAgent: req.get('user-agent')
     });
 
-    res.download(filePath, document.originalFileName);
+    // Obter stream do arquivo do storage
+    const fileStream = await storageService.getFileStream(storageKey);
+    
+    // Configurar headers
+    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${document.originalFileName}"`);
+
+    // Pipe do stream para resposta
+    fileStream.pipe(res);
   } catch (error) {
     next(error);
   }
@@ -557,7 +565,7 @@ export const viewDocument = async (
     res.setHeader('Content-Disposition', `inline; filename="${document.originalFileName}"`);
 
     // Obter stream do arquivo do storage
-    const fileStream = storageService.getFileStream(storageKey);
+    const fileStream = await storageService.getFileStream(storageKey);
     fileStream.pipe(res);
   } catch (error) {
     next(error);
