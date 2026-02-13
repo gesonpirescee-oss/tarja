@@ -73,6 +73,7 @@ const DocumentsPage = () => {
 
   useEffect(() => {
     fetchDocuments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   const getStatusColor = (status: string) => {
@@ -237,6 +238,7 @@ const DocumentsPage = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
       )}
 
       {tabValue === 1 && (

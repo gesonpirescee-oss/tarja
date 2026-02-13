@@ -121,72 +121,73 @@ const DocumentReviewPage = () => {
             Detecções ({detections.length})
           </Typography>
 
-      {detections.length === 0 ? (
-        <Alert severity="info">Nenhuma detecção encontrada neste documento.</Alert>
-      ) : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {detections.map((detection) => (
-              <Paper
-                key={detection.id}
-                id={`detection-${detection.id}`}
-                sx={{ p: 2, transition: 'background-color 0.3s' }}
-              >
-              <Typography variant="body1" fontWeight="bold">
-                {detection.type} - {detection.text}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Confiança: {detection.confidence}% | Risco: {detection.riskLevel}
-              </Typography>
-              <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
-                {!detection.isApproved && !detection.isRejected && (
-                  <>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      color="success"
-                      onClick={() => handleDetectionAction(detection.id, 'APPROVED')}
-                    >
-                      Aprovar
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      color="error"
-                      onClick={() => handleDetectionAction(detection.id, 'REJECTED')}
-                    >
-                      Rejeitar
-                    </Button>
-                  </>
-                )}
-                {detection.isApproved && (
-                  <Chip label="Aprovado" color="success" size="small" />
-                )}
-                {detection.isRejected && (
-                  <Chip label="Rejeitado" color="error" size="small" />
-                )}
-              </Box>
-              </Paper>
-            ))}
-          </Box>
+          {detections.length === 0 ? (
+            <Alert severity="info">Nenhuma detecção encontrada neste documento.</Alert>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {detections.map((detection) => (
+                <Paper
+                  key={detection.id}
+                  id={`detection-${detection.id}`}
+                  sx={{ p: 2, transition: 'background-color 0.3s' }}
+                >
+                  <Typography variant="body1" fontWeight="bold">
+                    {detection.type} - {detection.text}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Confiança: {detection.confidence}% | Risco: {detection.riskLevel}
+                  </Typography>
+                  <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                    {!detection.isApproved && !detection.isRejected && (
+                      <>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          onClick={() => handleDetectionAction(detection.id, 'APPROVED')}
+                        >
+                          Aprovar
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="error"
+                          onClick={() => handleDetectionAction(detection.id, 'REJECTED')}
+                        >
+                          Rejeitar
+                        </Button>
+                      </>
+                    )}
+                    {detection.isApproved && (
+                      <Chip label="Aprovado" color="success" size="small" />
+                    )}
+                    {detection.isRejected && (
+                      <Chip label="Rejeitado" color="error" size="small" />
+                    )}
+                  </Box>
+                </Paper>
+              ))}
+            </Box>
+          )}
 
           {detections.some((d) => d.isApproved) && (
-        <Box sx={{ mt: 3 }}>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={async () => {
-              try {
-                await api.post(`/documents/${id}/redact`);
-                alert('Tarja aplicada com sucesso!');
-                fetchDocument();
-              } catch (error) {
-                console.error('Error applying redaction:', error);
-              }
-            }}
-          >
-              Aplicar Tarja
-            </Button>
-          </Box>
+            <Box sx={{ mt: 3 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={async () => {
+                  try {
+                    await api.post(`/documents/${id}/redact`);
+                    alert('Tarja aplicada com sucesso!');
+                    fetchDocument();
+                  } catch (error) {
+                    console.error('Error applying redaction:', error);
+                  }
+                }}
+              >
+                Aplicar Tarja
+              </Button>
+            </Box>
           )}
         </Box>
       )}

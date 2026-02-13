@@ -1,11 +1,12 @@
 import { Outlet } from 'react-router-dom';
 import { Box, AppBar, Toolbar, Typography, Button, Container } from '@mui/material';
 import { useAuthStore } from '../store/authStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const Layout = () => {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     logout();
@@ -16,11 +17,37 @@ const Layout = () => {
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          <Typography 
+            variant="h6" 
+            component="div" 
+            sx={{ flexGrow: 1, cursor: 'pointer' }}
+            onClick={() => navigate('/')}
+          >
             Tarja
           </Typography>
           {user && (
             <>
+              <Button 
+                color="inherit" 
+                onClick={() => navigate('/')}
+                sx={{ mr: 2, textTransform: 'none' }}
+              >
+                Dashboard
+              </Button>
+              <Button 
+                color="inherit" 
+                onClick={() => navigate('/documents')}
+                sx={{ mr: 2, textTransform: 'none' }}
+              >
+                Documentos
+              </Button>
+              <Button 
+                color="inherit" 
+                onClick={() => navigate('/audit')}
+                sx={{ mr: 2, textTransform: 'none' }}
+              >
+                Auditoria
+              </Button>
               <Typography variant="body2" sx={{ mr: 2 }}>
                 {user.name}
               </Typography>

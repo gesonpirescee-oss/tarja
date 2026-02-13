@@ -27,6 +27,7 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     purpose: '',
@@ -45,6 +46,7 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
+      setSelectedFile(acceptedFiles[0]);
       setOpen(true);
       setError('');
       setSuccess(false);
@@ -68,13 +70,11 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
       return;
     }
 
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    if (!selectedFile) {
       setError('Por favor, selecione um arquivo');
       return;
     }
 
-    const file = fileInput.files[0];
     setUploading(true);
     setProgress(0);
     setError('');
@@ -82,7 +82,7 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
 
     try {
       const uploadData = new FormData();
-      uploadData.append('file', file);
+      uploadData.append('file', selectedFile);
       uploadData.append('purpose', formData.purpose);
       uploadData.append('legalBasis', formData.legalBasis);
       uploadData.append('retentionDays', formData.retentionDays);
@@ -107,6 +107,7 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
       setTimeout(() => {
         setOpen(false);
         setFormData({ purpose: '', legalBasis: '', retentionDays: '30' });
+        setSelectedFile(null);
         setUploading(false);
         setProgress(0);
         if (onUploadSuccess) {
@@ -124,6 +125,7 @@ const DocumentUpload = ({ onUploadSuccess }: DocumentUploadProps) => {
     if (!uploading) {
       setOpen(false);
       setFormData({ purpose: '', legalBasis: '', retentionDays: '30' });
+      setSelectedFile(null);
       setError('');
       setSuccess(false);
     }
