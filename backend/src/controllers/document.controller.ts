@@ -7,6 +7,7 @@ import { processDocument } from '../services/document.service';
 import { redactDocument } from '../services/redaction.service';
 import { createHash } from 'crypto';
 import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { createReadStream } from 'fs';
 import path from 'path';
 
 export const uploadDocument = async (
@@ -437,6 +438,45 @@ export const downloadDocument = async (
     });
 
     res.download(filePath, document.originalFileName);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const viewDocument = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+
+    const document = await prisma.document.findFirst({
+      where: {
+        id,
+        organizationId: req.organizationId
+      }
+    });
+
+    if (!document) {
+      throw new CustomError('Document not found', 404);
+    }
+
+    // Para visualização, sempre usar o original (não tarjado)
+    const filePath = document.originalPath;
+
+    if (!filePath || !existsSync(filePath)) {
+      throw new CustomError('File not found', 404);
+    }
+
+    // Determinar content type
+    const contentType = document.mimeType || 'application/pdf';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${document.originalFileName}"`);
+
+    // Stream do arquivo
+    const fileStream = createReadStream(filePath);
+    fileStream.pipe(res);
   } catch (error) {
     next(error);
   }

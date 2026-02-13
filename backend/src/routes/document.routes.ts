@@ -7,7 +7,8 @@ import {
   getDocumentDetections,
   updateDetection,
   applyRedaction,
-  downloadDocument
+  downloadDocument,
+  viewDocument
 } from '../controllers/document.controller';
 import { upload } from '../middleware/upload.middleware';
 
@@ -22,4 +23,5 @@ documentRoutes.get('/:id', getDocument);
 documentRoutes.get('/:id/detections', getDocumentDetections);
 documentRoutes.put('/:id/detections/:detectionId', updateDetection);
 documentRoutes.post('/:id/redact', applyRedaction);
+documentRoutes.get('/:id/view', viewDocument);
 documentRoutes.get('/:id/download', downloadDocument);

@@ -1,13 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Box, Typography, Button, Paper, Alert, Chip } from '@mui/material';
+import {
+  Box,
+  Typography,
+  Button,
+  Paper,
+  Alert,
+  Chip,
+  Grid,
+  Tabs,
+  Tab,
+} from '@mui/material';
 import { api } from '../services/api';
+import PDFViewer from '../components/PDFViewer';
 
 const DocumentReviewPage = () => {
   const { id } = useParams();
   const [document, setDocument] = useState<any>(null);
   const [detections, setDetections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tabValue, setTabValue] = useState(0);
 
   useEffect(() => {
     if (id) {
@@ -49,6 +61,20 @@ const DocumentReviewPage = () => {
     return <Typography>Carregando...</Typography>;
   }
 
+  const handleDetectionClick = (detection: any) => {
+    // Scroll para a detecção na lista ou destacar
+    const element = document.getElementById(`detection-${detection.id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element.style.backgroundColor = 'rgba(25, 118, 210, 0.1)';
+      setTimeout(() => {
+        element.style.backgroundColor = '';
+      }, 2000);
+    }
+  };
+
+  const isPDF = document?.mimeType === 'application/pdf';
+
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
@@ -59,21 +85,52 @@ const DocumentReviewPage = () => {
         <Paper sx={{ p: 2, mb: 3 }}>
           <Typography variant="h6">{document.originalFileName}</Typography>
           <Typography variant="body2" color="text.secondary">
-            Status: {document.status}
+            Status: {document.status} | Tipo: {document.mimeType}
           </Typography>
         </Paper>
       )}
 
-      <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
-        Detecções ({detections.length})
-      </Typography>
+      <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)} sx={{ mb: 3 }}>
+        <Tab label={isPDF ? 'Visualizar PDF' : 'Documento'} />
+        <Tab label={`Detecções (${detections.length})`} />
+      </Tabs>
+
+      {tabValue === 0 && (
+        <Box>
+          {isPDF && id ? (
+            <PDFViewer
+              documentId={id}
+              detections={detections}
+              onDetectionClick={handleDetectionClick}
+            />
+          ) : (
+            <Paper sx={{ p: 3, textAlign: 'center' }}>
+              <Typography>
+                Visualização de imagens será implementada em breve.
+                <br />
+                Por enquanto, use a aba de detecções para revisar.
+              </Typography>
+            </Paper>
+          )}
+        </Box>
+      )}
+
+      {tabValue === 1 && (
+        <Box>
+          <Typography variant="h6" gutterBottom>
+            Detecções ({detections.length})
+          </Typography>
 
       {detections.length === 0 ? (
         <Alert severity="info">Nenhuma detecção encontrada neste documento.</Alert>
       ) : (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {detections.map((detection) => (
-            <Paper key={detection.id} sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {detections.map((detection) => (
+              <Paper
+                key={detection.id}
+                id={`detection-${detection.id}`}
+                sx={{ p: 2, transition: 'background-color 0.3s' }}
+              >
               <Typography variant="body1" fontWeight="bold">
                 {detection.type} - {detection.text}
               </Typography>
@@ -108,12 +165,11 @@ const DocumentReviewPage = () => {
                   <Chip label="Rejeitado" color="error" size="small" />
                 )}
               </Box>
-            </Paper>
-          ))}
-        </Box>
-      )}
+              </Paper>
+            ))}
+          </Box>
 
-      {detections.some((d) => d.isApproved) && (
+          {detections.some((d) => d.isApproved) && (
         <Box sx={{ mt: 3 }}>
           <Button
             variant="contained"
@@ -128,8 +184,10 @@ const DocumentReviewPage = () => {
               }
             }}
           >
-            Aplicar Tarja
-          </Button>
+              Aplicar Tarja
+            </Button>
+          </Box>
+          )}
         </Box>
       )}
     </Box>
