@@ -1,10 +1,11 @@
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, PDFPage } from 'pdf-lib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import sharp from 'sharp';
 import { createHash } from 'crypto';
 import { logger } from '../utils/logger';
 import { Detection } from '@prisma/client';
+import pdfParse from 'pdf-parse';
 
 interface RedactionResult {
   outputPath: string;
@@ -43,14 +44,49 @@ export const redactPDF = async (
       detectionsByPage.get(pageNum)!.push(detection);
     });
 
-    // Aplicar tarja em cada página
+    // Extrair texto do PDF para encontrar posições
+    const pdfTextData = await pdfParse(pdfBytes);
+    const fullText = pdfTextData.text || '';
+    const totalPages = pdfTextData.numpages || pages.length;
+    
+    // Dividir texto por página (aproximado) para busca
+    const pageTexts: string[] = [];
+    const avgCharsPerPage = fullText.length / totalPages;
+    
+    for (let i = 0; i < totalPages; i++) {
+      const start = Math.floor(i * avgCharsPerPage);
+      const end = i === totalPages - 1 ? fullText.length : Math.floor((i + 1) * avgCharsPerPage);
+      pageTexts.push(fullText.substring(start, end));
+    }
+    
+    logger.info(`PDF has ${totalPages} pages, ${detections.length} detections to process`);
+    
+    // Aplicar tarja apenas nas páginas que têm detecções aprovadas
+    logger.info(`Processing ${detectionsByPage.size} pages with detections out of ${pages.length} total pages`);
+    
     detectionsByPage.forEach((pageDetections, pageNum) => {
       const pageIndex = pageNum - 1;
-      if (pageIndex >= 0 && pageIndex < pages.length) {
+      if (pageIndex >= 0 && pageIndex < pages.length && pageDetections.length > 0) {
         const page = pages[pageIndex];
-        const { height } = page.getSize();
+        const { width, height } = page.getSize();
+        const pageText = pageTexts[pageIndex] || '';
+
+        logger.info(`Page ${pageNum}: Applying ${pageDetections.length} redactions`);
 
         pageDetections.forEach((detection) => {
+          const detectionText = detection.text.trim();
+          
+          // Verificar se a detecção realmente pertence a esta página usando startIndex
+          const detectionStartIndex = detection.startIndex || 0;
+          const pageStartIndex = Math.floor((pageNum - 1) * avgCharsPerPage);
+          const pageEndIndex = pageNum === totalPages ? fullText.length : Math.floor(pageNum * avgCharsPerPage);
+          
+          // Se a detecção não está nesta página, pular (não aplicar tarja)
+          if (detectionStartIndex < pageStartIndex || detectionStartIndex >= pageEndIndex) {
+            logger.info(`Skipping detection "${detectionText}" - index ${detectionStartIndex} not in page ${pageNum} range (${pageStartIndex}-${pageEndIndex})`);
+            return;
+          }
+          
           // Se temos bounding box, usar coordenadas exatas
           if (detection.boundingBox && typeof detection.boundingBox === 'object') {
             const bbox = detection.boundingBox as any;
@@ -59,6 +95,8 @@ export const redactPDF = async (
             const w = bbox.width || 100;
             const h = bbox.height || 20;
 
+            logger.info(`Redacting with bounding box: x=${x}, y=${y}, w=${w}, h=${h}`);
+            
             // Desenhar retângulo preto sobre a área
             page.drawRectangle({
               x,
@@ -69,16 +107,76 @@ export const redactPDF = async (
               borderColor: rgb(0, 0, 0),
             });
           } else {
-            // Fallback: usar posição aproximada baseada no índice do texto
-            // Isso é menos preciso, mas funciona quando não temos coordenadas
-            const estimatedY = height - (detection.startIndex % 1000) * 0.5;
-            page.drawRectangle({
-              x: 50,
-              y: estimatedY - 10,
-              width: 200,
-              height: 20,
-              color: rgb(0, 0, 0),
-            });
+            // Tentar encontrar o texto na página específica usando o startIndex relativo à página
+            const detectionStartIndex = detection.startIndex || 0;
+            const pageStartIndex = Math.floor((pageNum - 1) * avgCharsPerPage);
+            const relativeIndex = detectionStartIndex - pageStartIndex;
+            
+            // Se o índice relativo está fora dos limites da página, não aplicar tarja aqui
+            if (relativeIndex < 0 || relativeIndex >= pageText.length) {
+              logger.warn(`Detection "${detectionText}" relative index ${relativeIndex} out of page ${pageNum} bounds (0-${pageText.length}), skipping`);
+              return;
+            }
+            
+            // Limpar o texto da detecção para melhor matching
+            const cleanDetectionText = detectionText.replace(/[^\w@.-]/g, '');
+            const cleanPageText = pageText.replace(/[^\w@.-]/g, ' ');
+            
+            // Buscar o texto na página (case insensitive)
+            const searchText = cleanDetectionText.toLowerCase();
+            const pageTextLower = cleanPageText.toLowerCase();
+            let textIndex = pageTextLower.indexOf(searchText);
+            
+            // Se não encontrou exato, tentar buscar uma substring menor
+            if (textIndex < 0 && detectionText.length > 5) {
+              const shortText = detectionText.substring(0, Math.min(10, detectionText.length)).toLowerCase();
+              textIndex = pageTextLower.indexOf(shortText);
+            }
+            
+            if (textIndex >= 0) {
+              // Calcular posição baseada na posição do texto encontrado na página
+              // Assumir layout padrão com margens
+              const charsBefore = textIndex;
+              
+              // Estimar linhas e colunas (assumindo ~70-90 caracteres por linha)
+              const avgCharsPerLine = Math.max(60, Math.min(100, Math.floor(width / 8))); // Ajustar baseado na largura da página
+              const linesBefore = Math.floor(charsBefore / avgCharsPerLine);
+              const charsInLine = charsBefore % avgCharsPerLine;
+              
+              // Calcular Y (PDF usa coordenadas de baixo para cima)
+              // Margem superior padrão: ~50-80px, altura de linha: ~12-16px
+              const topMargin = 70;
+              const lineHeight = 14;
+              const estimatedY = height - (topMargin + (linesBefore * lineHeight) + lineHeight);
+              
+              // Calcular largura baseada no comprimento do texto
+              // Assumir ~6-8 pixels por caractere (fonte padrão)
+              const charWidth = 7;
+              const estimatedWidth = Math.min(detectionText.length * charWidth + 10, width - 100); // +10 para margem
+              
+              // Calcular X baseado na posição na linha
+              const estimatedX = 50 + (charsInLine * charWidth);
+              
+              logger.info(`Redacting "${detectionText}" at position: x=${estimatedX.toFixed(1)}, y=${estimatedY.toFixed(1)}, w=${estimatedWidth.toFixed(1)} (found at index ${textIndex} in page ${pageNum})`);
+              
+              // Aplicar tarja com validação de limites
+              const finalX = Math.max(50, Math.min(estimatedX, width - estimatedWidth - 50));
+              const finalY = Math.max(0, Math.min(estimatedY, height - lineHeight));
+              const finalWidth = Math.max(50, Math.min(estimatedWidth, width - finalX - 50));
+              const finalHeight = Math.max(12, lineHeight);
+              
+              page.drawRectangle({
+                x: finalX,
+                y: finalY,
+                width: finalWidth,
+                height: finalHeight,
+                color: rgb(0, 0, 0),
+                borderColor: rgb(0, 0, 0),
+              });
+            } else {
+              // Se não encontrou o texto, não aplicar tarja (melhor do que aplicar no lugar errado)
+              logger.warn(`Could not find text "${detectionText}" in page ${pageNum} text, skipping redaction to avoid incorrect placement`);
+            }
           }
         });
       }

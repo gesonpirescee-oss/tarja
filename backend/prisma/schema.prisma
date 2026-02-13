@@ -113,8 +113,8 @@ model Document {
   legalBasis        String
   retentionDays     Int
   
-  organizationId    String
-  organization      Organization @relation(fields: [organizationId], references: [id])
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
   uploadedById      String
   uploadedBy        User         @relation(fields: [uploadedById], references: [id])
   

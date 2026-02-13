@@ -6,10 +6,22 @@ import { createAuditLog } from '../utils/audit';
 import { processDocument } from '../services/document.service';
 import { redactDocument } from '../services/redaction.service';
 import { storageService } from '../services/storage.service';
+import { logger } from '../utils/logger';
 import { createHash } from 'crypto';
-import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync, mkdirSync, createWriteStream } from 'fs';
 import { createReadStream } from 'fs';
-import path from 'path';
+import path, { dirname } from 'path';
+
+// Helper function to build document where clause
+const buildDocumentWhere = (req: AuthRequest, additionalWhere: any = {}) => {
+  const where: any = { ...additionalWhere };
+  if (req.organizationId) {
+    where.organizationId = req.organizationId;
+  } else {
+    where.uploadedById = req.userId;
+  }
+  return where;
+};
 
 export const uploadDocument = async (
   req: AuthRequest,
@@ -44,8 +56,10 @@ export const uploadDocument = async (
 
     // Upload para storage (S3/MinIO ou local)
     const fileExtension = path.extname(req.file.originalname).substring(1);
+    // Usar userId como fallback se não houver organizationId
+    const orgId = req.organizationId || req.userId!;
     const storageKey = storageService.generateKey(
-      req.organizationId!,
+      orgId,
       'temp', // Será atualizado após criar o documento
       'original',
       fileExtension
@@ -69,7 +83,7 @@ export const uploadDocument = async (
         purpose,
         legalBasis,
         retentionDays: parseInt(retentionDays),
-        organizationId: req.organizationId!,
+        organizationId: req.organizationId || null,
         uploadedById: req.userId!,
         originalPath: storageKey, // Armazenar a chave do storage
         status: 'UPLOADED'
@@ -78,7 +92,7 @@ export const uploadDocument = async (
 
     // Atualizar chave do storage com o ID real do documento
     const finalKey = storageService.generateKey(
-      req.organizationId!,
+      orgId,
       tempDoc.id,
       'original',
       fileExtension
@@ -141,9 +155,14 @@ export const getDocuments = async (
   try {
     const { page = '1', limit = '20', status, fileType, search } = req.query;
 
-    const where: any = {
-      organizationId: req.organizationId
-    };
+    const where: any = {};
+    
+    // Se o usuário tem organização, filtrar por ela; caso contrário, mostrar apenas documentos do próprio usuário
+    if (req.organizationId) {
+      where.organizationId = req.organizationId;
+    } else {
+      where.uploadedById = req.userId;
+    }
 
     if (status) {
       where.status = status;
@@ -249,10 +268,7 @@ export const getDocumentDetections = async (
     const { id } = req.params;
 
     const document = await prisma.document.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId
-      }
+      where: buildDocumentWhere(req, { id })
     });
 
     if (!document) {
@@ -300,10 +316,7 @@ export const updateDetection = async (
     }
 
     const document = await prisma.document.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId
-      }
+      where: buildDocumentWhere(req, { id })
     });
 
     if (!document) {
@@ -367,12 +380,10 @@ export const applyRedaction = async (
 ) => {
   try {
     const { id } = req.params;
+    logger.info(`Applying redaction to document ${id}`);
 
     const document = await prisma.document.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId
-      },
+      where: buildDocumentWhere(req, { id }),
       include: {
         detections: {
           where: {
@@ -387,8 +398,12 @@ export const applyRedaction = async (
       throw new CustomError('Document not found', 404);
     }
 
-    if (document.status !== 'REVIEW_READY' && document.status !== 'DETECTION_COMPLETE') {
-      throw new CustomError('Document not ready for redaction', 400);
+    logger.info(`Document found: ${document.originalFileName}, status: ${document.status}`);
+    logger.info(`Approved detections: ${document.detections.length}`);
+
+    // Permitir aplicar tarja se houver detecções aprovadas
+    if (document.detections.length === 0) {
+      throw new CustomError('No approved detections to redact', 400);
     }
 
     if (!document.originalPath) {
@@ -403,21 +418,30 @@ export const applyRedaction = async (
     }
 
     // Download do storage para arquivo temporário
+    logger.info(`Downloading file from storage: ${document.originalPath}`);
     const fileStream = await storageService.getFileStream(document.originalPath);
-    const writeStream = require('fs').createWriteStream(tempOriginalPath);
+    const writeStream = createWriteStream(tempOriginalPath);
     await new Promise<void>((resolve, reject) => {
       fileStream.pipe(writeStream);
-      writeStream.on('finish', () => resolve());
-      writeStream.on('error', reject);
+      writeStream.on('finish', () => {
+        logger.info(`File downloaded to: ${tempOriginalPath}`);
+        resolve();
+      });
+      writeStream.on('error', (err) => {
+        logger.error('Error downloading file', err);
+        reject(err);
+      });
     });
 
     // Preparar diretório de saída
-    const outputDir = path.join('uploads', 'redacted', document.organizationId || 'default');
+    const orgId = document.organizationId || document.uploadedById;
+    const outputDir = path.join('uploads', 'redacted', orgId);
     if (!existsSync(outputDir)) {
       mkdirSync(outputDir, { recursive: true });
     }
 
     // Aplicar tarja
+    logger.info(`Applying redaction to ${tempOriginalPath} with ${document.detections.length} detections`);
     const redactionResult = await redactDocument(
       tempOriginalPath,
       document.mimeType,
@@ -425,10 +449,11 @@ export const applyRedaction = async (
       outputDir,
       document.id
     );
+    logger.info(`Redaction completed: ${redactionResult.outputPath}`);
 
     // Upload do arquivo tarjado para storage
     const redactedKey = storageService.generateKey(
-      document.organizationId,
+      orgId,
       document.id,
       'redacted',
       document.fileType
@@ -454,7 +479,7 @@ export const applyRedaction = async (
         documentId: id,
         version: 1,
         type: 'redacted',
-        filePath: redactionResult.outputPath,
+        filePath: redactedKey, // Usar chave do storage, não path local
         hash: redactionResult.hash
       }
     });
@@ -503,10 +528,7 @@ export const downloadDocument = async (
     const { type = 'redacted' } = req.query;
 
     const document = await prisma.document.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId
-      }
+      where: buildDocumentWhere(req, { id })
     });
 
     if (!document) {
@@ -560,18 +582,15 @@ export const viewDocument = async (
     const { id } = req.params;
 
     const document = await prisma.document.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId
-      }
+      where: buildDocumentWhere(req, { id })
     });
 
     if (!document) {
       throw new CustomError('Document not found', 404);
     }
 
-    // Para visualização, sempre usar o original (não tarjado)
-    const storageKey = document.originalPath;
+    // Para visualização, usar o tarjado se existir, senão usar o original
+    const storageKey = document.redactedPath || document.originalPath;
 
     if (!storageKey) {
       throw new CustomError('File not found', 404);
