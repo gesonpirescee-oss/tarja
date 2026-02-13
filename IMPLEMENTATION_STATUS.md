@@ -62,8 +62,9 @@
 ## 🚧 Em Desenvolvimento / Pendente
 
 ### Backend
-- ⏳ Serviço de aplicação de tarja em PDF (pdf-lib)
-- ⏳ Serviço de aplicação de tarja em imagens (Sharp)
+- ✅ Serviço de aplicação de tarja em PDF (pdf-lib)
+- ✅ Serviço de aplicação de tarja em imagens (Sharp)
+- ✅ Integração do serviço de redação no controller
 - ⏳ Integração com storage S3/MinIO
 - ⏳ Políticas de retenção e expurgo automático
 - ⏳ Melhorias na detecção (mais tipos de dados)
@@ -72,7 +73,8 @@
 - ⏳ Detecção de dados bancários completos
 
 ### Frontend
-- ⏳ Componente de upload com drag-and-drop
+- ✅ Componente de upload com drag-and-drop
+- ✅ Integração do upload na página de documentos
 - ⏳ Visualizador de PDF com overlay de detecções
 - ⏳ Editor interativo de revisão (seleção de áreas)
 - ⏳ Preview de documento tarjado
@@ -144,4 +146,19 @@
 - ✅ Seção 11: Riscos - Documentados
 - ✅ Seção 12: Próximos Passos - Em execução
 
-**Progresso Geral: ~60% do MVP**
+**Progresso Geral: ~70% do MVP**
+
+## 🎉 Últimas Atualizações
+
+### Serviço de Redação Implementado
+- ✅ Redação em PDFs usando pdf-lib com suporte a bounding boxes
+- ✅ Redação em imagens usando Sharp com composição de retângulos
+- ✅ Geração de hash SHA-256 para integridade
+- ✅ Integração completa no fluxo de aplicação de tarja
+
+### Componente de Upload
+- ✅ Interface drag-and-drop profissional
+- ✅ Validação de arquivos (tipo, tamanho)
+- ✅ Formulário LGPD completo (finalidade, base legal, retenção)
+- ✅ Feedback visual e barra de progresso
+- ✅ Integrado na página de documentos com sistema de abas

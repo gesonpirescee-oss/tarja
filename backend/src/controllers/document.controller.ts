@@ -4,8 +4,9 @@ import { CustomError } from '../middleware/errorHandler';
 import { prisma } from '../config/database';
 import { createAuditLog } from '../utils/audit';
 import { processDocument } from '../services/document.service';
+import { redactDocument } from '../services/redaction.service';
 import { createHash } from 'crypto';
-import { readFileSync, unlinkSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 
 export const uploadDocument = async (
@@ -327,15 +328,43 @@ export const applyRedaction = async (
       throw new CustomError('Document not ready for redaction', 400);
     }
 
-    // TODO: Implement actual redaction logic
-    // This will be implemented in the redaction service
+    if (!document.originalPath || !existsSync(document.originalPath)) {
+      throw new CustomError('Original file not found', 404);
+    }
 
-    // Update document status
+    // Preparar diretório de saída
+    const outputDir = path.join('uploads', 'redacted', document.organizationId || 'default');
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Aplicar tarja
+    const redactionResult = await redactDocument(
+      document.originalPath,
+      document.mimeType,
+      document.detections,
+      outputDir,
+      document.id
+    );
+
+    // Criar versão do documento tarjado
+    await prisma.documentVersion.create({
+      data: {
+        documentId: id,
+        version: 1,
+        type: 'redacted',
+        filePath: redactionResult.outputPath,
+        hash: redactionResult.hash
+      }
+    });
+
+    // Update document status e caminho do arquivo tarjado
     const updatedDocument = await prisma.document.update({
       where: { id },
       data: {
         status: 'REDACTED',
-        redactedAt: new Date()
+        redactedAt: new Date(),
+        redactedPath: redactionResult.outputPath
       }
     });
 
