@@ -139,7 +139,7 @@ export const getDocuments = async (
   next: NextFunction
 ) => {
   try {
-    const { page = '1', limit = '20', status } = req.query;
+    const { page = '1', limit = '20', status, fileType, search } = req.query;
 
     const where: any = {
       organizationId: req.organizationId
@@ -147,6 +147,24 @@ export const getDocuments = async (
 
     if (status) {
       where.status = status;
+    }
+
+    if (fileType) {
+      where.fileType = {
+        equals: fileType,
+        mode: 'insensitive'
+      };
+    }
+
+    if (search) {
+      where.OR = [
+        {
+          originalFileName: {
+            contains: search as string,
+            mode: 'insensitive'
+          }
+        }
+      ];
     }
 
     const documents = await prisma.document.findMany({

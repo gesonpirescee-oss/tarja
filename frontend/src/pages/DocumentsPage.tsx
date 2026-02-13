@@ -14,8 +14,14 @@ import {
   IconButton,
   Tabs,
   Tab,
+  TextField,
+  MenuItem,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
 } from '@mui/material';
-import { Visibility } from '@mui/icons-material';
+import { Visibility, FilterList, Clear } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import DocumentUpload from '../components/DocumentUpload';
@@ -33,15 +39,30 @@ const DocumentsPage = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
+  const [filters, setFilters] = useState({
+    status: '',
+    fileType: '',
+    search: '',
+  });
+  const [showFilters, setShowFilters] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchDocuments();
-  }, []);
+  const handleFilterChange = (field: string, value: string) => {
+    setFilters((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const clearFilters = () => {
+    setFilters({ status: '', fileType: '', search: '' });
+  };
 
   const fetchDocuments = async () => {
     try {
-      const response = await api.get('/documents');
+      const params: any = {};
+      if (filters.status) params.status = filters.status;
+      if (filters.fileType) params.fileType = filters.fileType;
+      if (filters.search) params.search = filters.search;
+
+      const response = await api.get('/documents', { params });
       setDocuments(response.data.data.documents);
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -49,6 +70,10 @@ const DocumentsPage = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [filters]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'> = {
@@ -86,18 +111,95 @@ const DocumentsPage = () => {
       </Tabs>
 
       {tabValue === 0 && (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Nome do Arquivo</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Tamanho</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Data de Upload</TableCell>
-                <TableCell>Ações</TableCell>
-              </TableRow>
-            </TableHead>
+        <Box>
+          {/* Filtros */}
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FilterList />
+                <Typography variant="h6">Filtros</Typography>
+              </Box>
+              <Box>
+                <Button
+                  size="small"
+                  onClick={() => setShowFilters(!showFilters)}
+                  sx={{ mr: 1 }}
+                >
+                  {showFilters ? 'Ocultar' : 'Mostrar'} Filtros
+                </Button>
+                {(filters.status || filters.fileType || filters.search) && (
+                  <Button
+                    size="small"
+                    startIcon={<Clear />}
+                    onClick={clearFilters}
+                  >
+                    Limpar
+                  </Button>
+                )}
+              </Box>
+            </Box>
+
+            {showFilters && (
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="Buscar"
+                    placeholder="Nome do arquivo..."
+                    value={filters.search}
+                    onChange={(e) => handleFilterChange('search', e.target.value)}
+                    size="small"
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Status</InputLabel>
+                    <Select
+                      value={filters.status}
+                      label="Status"
+                      onChange={(e) => handleFilterChange('status', e.target.value)}
+                    >
+                      <MenuItem value="">Todos</MenuItem>
+                      <MenuItem value="UPLOADED">Enviado</MenuItem>
+                      <MenuItem value="PROCESSING">Processando</MenuItem>
+                      <MenuItem value="DETECTION_COMPLETE">Detecção Completa</MenuItem>
+                      <MenuItem value="REVIEW_PENDING">Aguardando Revisão</MenuItem>
+                      <MenuItem value="REDACTED">Tarjado</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Tipo de Arquivo</InputLabel>
+                    <Select
+                      value={filters.fileType}
+                      label="Tipo de Arquivo"
+                      onChange={(e) => handleFilterChange('fileType', e.target.value)}
+                    >
+                      <MenuItem value="">Todos</MenuItem>
+                      <MenuItem value="pdf">PDF</MenuItem>
+                      <MenuItem value="png">PNG</MenuItem>
+                      <MenuItem value="jpg">JPG</MenuItem>
+                      <MenuItem value="jpeg">JPEG</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            )}
+          </Paper>
+
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Nome do Arquivo</TableCell>
+                  <TableCell>Tipo</TableCell>
+                  <TableCell>Tamanho</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Data de Upload</TableCell>
+                  <TableCell>Ações</TableCell>
+                </TableRow>
+              </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
