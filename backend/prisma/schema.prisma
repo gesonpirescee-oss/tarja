@@ -1,0 +1,246 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  OPERATOR
+  REVIEWER
+  AUDITOR
+  VIEWER
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  DETECTION_COMPLETE
+  REVIEW_PENDING
+  REVIEW_IN_PROGRESS
+  REDACTION_READY
+  REDACTED
+  ARCHIVED
+  DELETED
+}
+
+enum DetectionType {
+  CPF
+  RG
+  CNH
+  TITLE
+  PASSPORT
+  EMAIL
+  PHONE
+  ADDRESS
+  BANK_ACCOUNT
+  BANK_AGENCY
+  CREDIT_CARD
+  PIX
+  MEDICAL_RECORD
+  OTHER
+}
+
+enum DetectionRiskLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ReviewAction {
+  APPROVED
+  REJECTED
+  MODIFIED
+  ADDED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          UserRole @default(OPERATOR)
+  organizationId String?
+  organization  Organization? @relation(fields: [organizationId], references: [id])
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  documents     Document[]
+  reviews       DetectionReview[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([organizationId])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       User[]
+  documents   Document[]
+  policies    RetentionPolicy[]
+
+  @@index([slug])
+}
+
+model Document {
+  id                String         @id @default(uuid())
+  originalFileName  String
+  fileType          String
+  fileSize          Int
+  mimeType          String
+  hash              String         @unique
+  status            DocumentStatus @default(UPLOADED)
+  
+  // LGPD fields
+  purpose           String
+  legalBasis        String
+  retentionDays     Int
+  
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  uploadedById      String
+  uploadedBy        User         @relation(fields: [uploadedById], references: [id])
+  
+  // Storage paths
+  originalPath      String?
+  redactedPath      String?
+  
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  processedAt       DateTime?
+  redactedAt        DateTime?
+
+  // Relations
+  versions          DocumentVersion[]
+  detections        Detection[]
+  jobs              ProcessingJob[]
+
+  @@index([organizationId])
+  @@index([uploadedById])
+  @@index([status])
+  @@index([hash])
+  @@index([createdAt])
+}
+
+model DocumentVersion {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version     Int      @default(1)
+  type        String   // 'original' | 'redacted'
+  filePath    String
+  hash        String
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, version, type])
+  @@index([documentId])
+}
+
+model ProcessingJob {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  jobType     String   // 'ocr' | 'detection' | 'redaction'
+  status      String   // 'pending' | 'processing' | 'completed' | 'failed'
+  progress    Int      @default(0)
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  @@index([documentId])
+  @@index([status])
+}
+
+model Detection {
+  id              String           @id @default(uuid())
+  documentId      String
+  document        Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  type            DetectionType
+  riskLevel       DetectionRiskLevel
+  confidence      Float            // 0-100
+  text            String
+  startIndex      Int
+  endIndex        Int
+  pageNumber      Int?
+  boundingBox     Json?            // {x, y, width, height}
+  isApproved      Boolean          @default(false)
+  isRejected      Boolean          @default(false)
+  reviewedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relations
+  reviews         DetectionReview[]
+
+  @@index([documentId])
+  @@index([type])
+  @@index([isApproved])
+}
+
+model DetectionReview {
+  id          String         @id @default(uuid())
+  detectionId String
+  detection   Detection      @relation(fields: [detectionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  action      ReviewAction
+  comment     String?
+  createdAt   DateTime       @default(now())
+
+  @@index([detectionId])
+  @@index([userId])
+}
+
+model RetentionPolicy {
+  id              String   @id @default(uuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String
+  documentType    String?  // null = todos os tipos
+  retentionDays   Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organizationId String?
+  documentId    String?
+  action        String   // 'login', 'upload', 'download', 'review', 'redact', 'delete', etc.
+  resourceType  String?  // 'document', 'user', 'policy', etc.
+  resourceId     String?
+  details       Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([documentId])
+  @@index([action])
+  @@index([createdAt])
+}
