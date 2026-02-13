@@ -5,6 +5,7 @@ import { prisma } from '../config/database';
 import { createAuditLog } from '../utils/audit';
 import { processDocument } from '../services/document.service';
 import { redactDocument } from '../services/redaction.service';
+import { storageService } from '../services/storage.service';
 import { createHash } from 'crypto';
 import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { createReadStream } from 'fs';
@@ -41,11 +42,27 @@ export const uploadDocument = async (
       throw new CustomError('Document already exists', 409);
     }
 
-    // Create document record
-    const document = await prisma.document.create({
+    // Upload para storage (S3/MinIO ou local)
+    const fileExtension = path.extname(req.file.originalname).substring(1);
+    const storageKey = storageService.generateKey(
+      req.organizationId!,
+      'temp', // Será atualizado após criar o documento
+      'original',
+      fileExtension
+    );
+
+    // Upload do arquivo
+    const uploadResult = await storageService.uploadFile(
+      req.file.path,
+      storageKey,
+      req.file.mimetype
+    );
+
+    // Criar documento temporário para obter ID
+    const tempDoc = await prisma.document.create({
       data: {
         originalFileName: req.file.originalname,
-        fileType: path.extname(req.file.originalname).substring(1),
+        fileType: fileExtension,
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
@@ -54,10 +71,37 @@ export const uploadDocument = async (
         retentionDays: parseInt(retentionDays),
         organizationId: req.organizationId!,
         uploadedById: req.userId!,
-        originalPath: req.file.path,
+        originalPath: storageKey, // Armazenar a chave do storage
         status: 'UPLOADED'
       }
     });
+
+    // Atualizar chave do storage com o ID real do documento
+    const finalKey = storageService.generateKey(
+      req.organizationId!,
+      tempDoc.id,
+      'original',
+      fileExtension
+    );
+
+    // Se a chave mudou, fazer upload novamente (ou renomear)
+    if (finalKey !== storageKey) {
+      // Re-upload com chave final
+      await storageService.uploadFile(req.file.path, finalKey, req.file.mimetype);
+      // Deletar arquivo temporário
+      await storageService.deleteFile(storageKey);
+    }
+
+    // Atualizar documento com chave final
+    const document = await prisma.document.update({
+      where: { id: tempDoc.id },
+      data: { originalPath: finalKey }
+    });
+
+    // Limpar arquivo temporário local
+    if (existsSync(req.file.path)) {
+      unlinkSync(req.file.path);
+    }
 
     // Audit log
     await createAuditLog({
@@ -329,9 +373,25 @@ export const applyRedaction = async (
       throw new CustomError('Document not ready for redaction', 400);
     }
 
-    if (!document.originalPath || !existsSync(document.originalPath)) {
+    if (!document.originalPath) {
       throw new CustomError('Original file not found', 404);
     }
+
+    // Obter arquivo original do storage para processamento
+    const tempOriginalPath = path.join('uploads', 'temp', `temp_${document.id}_${Date.now()}.${document.fileType}`);
+    const tempDir = dirname(tempOriginalPath);
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
+    }
+
+    // Download do storage para arquivo temporário
+    const fileStream = storageService.getFileStream(document.originalPath);
+    const writeStream = require('fs').createWriteStream(tempOriginalPath);
+    await new Promise((resolve, reject) => {
+      fileStream.pipe(writeStream);
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
 
     // Preparar diretório de saída
     const outputDir = path.join('uploads', 'redacted', document.organizationId || 'default');
@@ -341,12 +401,34 @@ export const applyRedaction = async (
 
     // Aplicar tarja
     const redactionResult = await redactDocument(
-      document.originalPath,
+      tempOriginalPath,
       document.mimeType,
       document.detections,
       outputDir,
       document.id
     );
+
+    // Upload do arquivo tarjado para storage
+    const redactedKey = storageService.generateKey(
+      document.organizationId,
+      document.id,
+      'redacted',
+      document.fileType
+    );
+
+    await storageService.uploadFile(
+      redactionResult.outputPath,
+      redactedKey,
+      document.mimeType
+    );
+
+    // Limpar arquivos temporários
+    if (existsSync(tempOriginalPath)) {
+      unlinkSync(tempOriginalPath);
+    }
+    if (existsSync(redactionResult.outputPath)) {
+      unlinkSync(redactionResult.outputPath);
+    }
 
     // Criar versão do documento tarjado
     await prisma.documentVersion.create({
@@ -359,13 +441,13 @@ export const applyRedaction = async (
       }
     });
 
-    // Update document status e caminho do arquivo tarjado
+    // Update document status e caminho do arquivo tarjado (chave do storage)
     const updatedDocument = await prisma.document.update({
       where: { id },
       data: {
         status: 'REDACTED',
         redactedAt: new Date(),
-        redactedPath: redactionResult.outputPath
+        redactedPath: redactedKey
       }
     });
 
@@ -463,9 +545,9 @@ export const viewDocument = async (
     }
 
     // Para visualização, sempre usar o original (não tarjado)
-    const filePath = document.originalPath;
+    const storageKey = document.originalPath;
 
-    if (!filePath || !existsSync(filePath)) {
+    if (!storageKey) {
       throw new CustomError('File not found', 404);
     }
 
@@ -474,8 +556,8 @@ export const viewDocument = async (
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `inline; filename="${document.originalFileName}"`);
 
-    // Stream do arquivo
-    const fileStream = createReadStream(filePath);
+    // Obter stream do arquivo do storage
+    const fileStream = storageService.getFileStream(storageKey);
     fileStream.pipe(res);
   } catch (error) {
     next(error);

@@ -44,7 +44,9 @@
     "tesseract.js": "^5.0.4",
     "crypto": "^1.0.1",
     "winston": "^3.11.0",
-    "express-rate-limit": "^7.1.5"
+    "express-rate-limit": "^7.1.5",
+    "@aws-sdk/client-s3": "^3.490.0",
+    "@aws-sdk/s3-request-presigner": "^3.490.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
